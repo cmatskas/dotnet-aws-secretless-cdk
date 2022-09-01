@@ -1,7 +1,6 @@
 using Amazon.CDK;
-using Amazon.CDK.AWS.Events;
-using Amazon.CDK.AWS.Events.Targets;
-using Amazon.CDK.AWS.Lambda;
+using Amazon.CDK.AWS.EC2;
+using Amazon.CDK.AWS.RDS;
 using Amazon.CDK.AWS.SecretsManager;
 
 namespace DotnetAwsSecureCdk
@@ -10,23 +9,42 @@ namespace DotnetAwsSecureCdk
     {
         public DotnetAwsSecureCdkStack(Amazon.CDK.Construct scope, string id, IStackProps? props = null) : base(scope, id, props)
         {
-            var secret = Secret.FromSecretNameV2(this, id, "ApiKey");
+            var secret = Secret.FromSecretNameV2(this, id, "RDSPassword");
 
-            var lambdaFn = new Function(this, "Singleton", new FunctionProps {
-                Runtime = Runtime.PYTHON_3_9,
-                Code = Code.FromInline($"def main(event, context):{System.Environment.NewLine}    print(\"Do something with the ApiKey \"){System.Environment.NewLine}"),
-                Handler = "index.main",
-                Timeout = Duration.Seconds(300),
+            var vpc = new Vpc(this, "MyVpcSample", new VpcProps
+            {
+                Cidr = "10.0.0.0/16",
+                MaxAzs = 2,
+                SubnetConfiguration = new ISubnetConfiguration[]
+                {
+                    new SubnetConfiguration
+                    {
+                        CidrMask = 24,
+                        SubnetType = SubnetType.PUBLIC,
+                        Name = "MyPublicSubnet"
+                    },
+                    new SubnetConfiguration
+                    {
+                        CidrMask = 24,
+                        SubnetType = SubnetType.PRIVATE_WITH_NAT,
+                        Name = "MyPrivateSubnet"
+                    }
+                }
             });
-
-            lambdaFn.AddEnvironment("ApiKey", secret.SecretValue.UnsafeUnwrap());
-
-    
-            var rule = new Rule(this, "Rule", new RuleProps {
-                Schedule = Schedule.Expression("cron(0 18 ? * MON-FRI *)"),
+ 
+            const int dbPort = 1433;
+            
+            var db = new DatabaseInstance(this, "DB", new DatabaseInstanceProps
+            {
+                Vpc = vpc,
+                VpcSubnets = new SubnetSelection{ SubnetType = SubnetType.PRIVATE_WITH_NAT },
+                Engine = DatabaseInstanceEngine.SqlServerEx(new SqlServerExInstanceEngineProps { Version = SqlServerEngineVersion.VER_14 }),
+                InstanceType = InstanceType.Of(InstanceClass.BURSTABLE2, InstanceSize.MICRO),
+                Port = dbPort,
+                Credentials = Credentials.FromSecret(secret,"rds_god"),
+                InstanceIdentifier = "MyDbInstance",
+                BackupRetention = Duration.Seconds(0)
             });
-
-            rule.AddTarget(new LambdaFunction(lambdaFn));
         }
             
     }
